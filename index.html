@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modified Bass Test - Fully Autonomous AI</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            --bg: #09090b; --surface: #18181b; --surface-hover: #27272a; --border: #27272a;
+            --text-main: #f4f4f5; --text-muted: #a1a1aa; --brand: #3b82f6; 
+            --danger: #ef4444; --success: #10b981; --warning: #f59e0b;
+            --glass: rgba(24, 24, 27, 0.75);
+        }
+
+        * { box-sizing: border-box; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        body { background: var(--bg); color: var(--text-main); margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+        /* HEADER */
+        header { height: 64px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; padding: 0 24px; background: var(--bg); z-index: 20; }
+        .header-title { font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 10px;}
+        .subject-input { background: transparent; border: none; border-bottom: 1px solid var(--border); color: var(--text-main); font-size: 1rem; padding: 4px 8px; width: 250px; text-align: center; }
+        .subject-input:focus { outline: none; border-bottom-color: var(--brand); }
+        .header-actions { display: flex; gap: 10px; }
+        button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--surface); color: var(--text-main); border: 1px solid var(--border); padding: 8px 16px; border-radius: 6px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: 0.2s; }
+        button:hover { background: var(--surface-hover); }
+        button.primary { background: var(--brand); border-color: var(--brand); color: white; }
+        button.primary:hover { background: #2563eb; }
+        button.icon-only { padding: 8px; }
+        button.active-toggle { color: var(--danger); border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.1); }
+        button.active-calib { color: var(--brand); border-color: var(--brand); background: rgba(59, 130, 246, 0.1); }
+
+        /* CALIBRATION BANNER */
+        .calibration-banner { position: absolute; top: 0; left: 0; right: 0; background: rgba(59, 130, 246, 0.9); color: white; padding: 12px 24px; display: none; justify-content: space-between; align-items: center; font-weight: 600; z-index: 50; backdrop-filter: blur(8px); }
+        .calibration-banner button { border-color: rgba(255,255,255,0.3); background: rgba(0,0,0,0.2); }
+
+        /* MAIN LAYOUT */
+        main { display: grid; grid-template-columns: 1fr 480px; height: calc(100vh - 64px); overflow: hidden; position: relative; }
+        
+        /* LEFT: VIEWPORT */
+        .viewport-container { position: relative; background: #000; border-right: 1px solid var(--border); height: 100%; overflow: hidden; cursor: crosshair; }
+        video { display: none; } 
+        canvas { width: 100%; height: 100%; object-fit: contain; position: absolute; top: 0; left: 0; }
+        
+        /* HUD ELEMENTS */
+        .hud-top { position: absolute; top: 24px; left: 24px; right: 24px; display: flex; justify-content: space-between; align-items: flex-start; z-index: 10; pointer-events: none; }
+        .timer-hud { pointer-events: auto; background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 16px 24px; display: flex; align-items: center; gap: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); transition: 0.3s; }
+        .timer-hud.hold { background: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.5); }
+        .hud-time { font-size: 3.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+        .hud-meta { display: flex; flex-direction: column; gap: 4px; }
+        .hud-phase { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); font-weight: 600; }
+        .hud-marker { font-size: 1.2rem; font-weight: 600; }
+
+        .status-badges { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+        .fps-badge { background: var(--glass); backdrop-filter: blur(12px); padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; border: 1px solid rgba(255,255,255,0.1); color: var(--text-muted); pointer-events: auto; }
+        .rec-badge { display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); color: var(--danger); padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 700; align-items: center; gap: 8px; }
+        @keyframes pulseRec { 0% {opacity:1;} 50% {opacity:0.2;} 100% {opacity:1;} }
+        .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: pulseRec 1.5s infinite; }
+
+        .hud-bottom { position: absolute; bottom: 24px; left: 0; right: 0; display: flex; justify-content: center; gap: 12px; z-index: 10; flex-wrap: wrap; padding: 0 20px; }
+        .fault-pill { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 30px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 500; transition: 0.2s; }
+        .fault-pill.active { background: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.6); color: white; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success); }
+        .fault-pill.active .status-dot { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+
+        /* RIGHT: DIGITAL LEDGER */
+        .ledger-container { background: var(--bg); display: flex; flex-direction: column; overflow-y: auto; height: 100%; }
+        .score-total-row { padding: 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 15; }
+        .grand-total { font-size: 3rem; font-weight: 700; color: var(--brand); font-variant-numeric: tabular-nums; line-height: 1; }
+        .section-header { padding: 24px 24px 12px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); font-weight: 600; display: flex; justify-content: space-between; }
+        
+        .scoring-table { width: 100%; border-collapse: collapse; }
+        .scoring-table th, .scoring-table td { padding: 12px 16px; text-align: center; border-bottom: 1px solid var(--border); }
+        .scoring-table th { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+        input[type="number"].clean-input { width: 48px; background: #121214; border: 1px solid var(--border); color: var(--text-main); font-size: 1rem; font-weight: 600; text-align: center; padding: 4px; border-radius: 6px; }
+        input[type="number"].clean-input:focus { outline: none; border-color: var(--brand); background: var(--surface); }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        /* VAR LOG PANEL */
+        .var-log-box { margin: 0 24px 24px; background: #121214; border: 1px solid var(--border); border-radius: 8px; height: 140px; overflow-y: auto; padding: 12px; font-family: monospace; font-size: 0.85rem; }
+        .var-entry { padding: 4px 0; border-bottom: 1px dashed #27272a; display: flex; gap: 12px; }
+        .var-time { color: var(--brand); font-weight: bold; width: 60px; }
+        .var-event { color: #f4f4f5; }
+        .chart-wrapper { position: relative; width: 100%; height: 260px; padding: 0 24px 24px; }
+
+        /* SETTINGS MODAL */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 100; opacity: 0; pointer-events: none; transition: 0.2s; }
+        .modal-overlay.open { opacity: 1; pointer-events: auto; }
+        .modal-content { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; width: 500px; max-width: 90%; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); display: flex; flex-direction: column; }
+        .modal-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+        .form-group { display: flex; flex-direction: column; gap: 8px; }
+        .form-group label { font-size: 0.85rem; color: var(--text-muted); font-weight: 500;}
+        .form-group input, .form-group select { background: var(--surface); border: 1px solid var(--border); color: var(--text-main); padding: 10px; border-radius: 6px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title"><i data-lucide="activity" style="color: var(--brand);"></i> Bass Test Autonomous</div>
+        <div><input type="text" id="subjectName" class="subject-input" placeholder="Enter Subject Name / ID"></div>
+        <div class="header-actions">
+            <button class="primary" onclick="saveSubject()"><i data-lucide="save" size="18"></i> Save</button>
+            <button class="icon-only" onclick="toggleCamera()" title="Flip Camera"><i data-lucide="switch-camera" size="18"></i></button>
+            <button class="icon-only" id="calibBtn" onclick="toggleCalibration()" title="Calibrate Floor Markers"><i data-lucide="crosshair" size="18" id="calibIcon"></i></button>
+            <button class="icon-only" id="muteBtn" onclick="toggleMute()" title="Toggle Audio Feedback"><i data-lucide="volume-2" size="18" id="muteIcon"></i></button>
+            <button class="icon-only" onclick="toggleModal('settingsModal')"><i data-lucide="settings" size="18"></i></button>
+        </div>
+    </header>
+
+    <main>
+        <div class="calibration-banner" id="calibBanner">
+            <div style="display:flex; align-items:center; gap:8px;"><i data-lucide="mouse-pointer-click" size="18"></i><span id="calibText">Click video feed to place <b>Marker 1</b></span></div>
+            <div><button onclick="clearCalibration()">Reset</button><button onclick="toggleCalibration()" style="background:var(--danger); border-color:var(--danger);">Done</button></div>
+        </div>
+
+        <div class="viewport-container" id="videoContainer">
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="output_canvas"></canvas>
+            
+            <div class="hud-top">
+                <div class="timer-hud transition" id="timerCard">
+                    <button class="icon-only" style="background: transparent; border: none; padding: 0;" onclick="toggleTimer()">
+                        <i data-lucide="play-circle" size="48" id="timerIcon"></i>
+                    </button>
+                    <div><div class="hud-time" id="hudTime">0:05</div></div>
+                    <div class="hud-meta">
+                        <div class="hud-phase" id="hudPhase">Standby</div>
+                        <div class="hud-marker" id="hudMarker">Marker 1</div>
+                    </div>
+                    <button class="icon-only" style="background: transparent; border: none; opacity: 0.5;" onclick="resetTimer()">
+                        <i data-lucide="rotate-ccw" size="20"></i>
+                    </button>
+                </div>
+                <div class="status-badges">
+                    <div class="fps-badge" id="fpsDisplay">Initializing AI...</div>
+                    <div class="rec-badge" id="recBadge"><div class="rec-dot"></div> VAR REC</div>
+                </div>
+            </div>
+
+            <div class="hud-bottom">
+                <div class="fault-pill" id="cardHands"><div class="status-dot"></div><span id="badgeHands">Hands on Hips</span></div>
+                <div class="fault-pill" id="cardFoot"><div class="status-dot"></div><span id="badgeFoot">Free Foot Height</span></div>
+                <div class="fault-pill" id="cardHeel"><div class="status-dot"></div><span id="badgeHeel">Heel Elevation</span></div>
+                <div class="fault-pill" id="cardKnee"><div class="status-dot"></div><span id="badgeKnee">Knee Stability</span></div>
+            </div>
+        </div>
+
+        <div class="ledger-container">
+            <div class="score-total-row">
+                <div>
+                    <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Final Score</div>
+                    <div class="grand-total" id="grandTotal">0</div>
+                </div>
+                <div style="text-align: right;">
+                    <div id="ratingBadge" style="font-weight: 700; font-size: 1.2rem; color: var(--danger);">Incomplete</div>
+                    <div id="asymmetryText" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px; max-width: 220px;">Awaiting test data</div>
+                </div>
+            </div>
+
+            <div class="section-header">Course Markings</div>
+            <table class="scoring-table">
+                <thead><tr><th>#</th><th>Limb</th><th>Landing</th><th>Hold</th><th>Tot</th></tr></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+
+            <div class="section-header" style="margin-top: 8px;"><span>VAR Event Log</span><span id="varStatusText" style="color: var(--danger); display:none; font-size:0.7rem;">RECORDING</span></div>
+            <div class="var-log-box" id="varLogBox"><div style="color: var(--text-muted);">Awaiting sequence... Recording starts automatically.</div></div>
+
+            <div class="section-header" style="margin-top: 0;">Symmetry Profile</div>
+            <div class="chart-wrapper"><canvas id="radarChart"></canvas></div>
+        </div>
+    </main>
+
+    <!-- SETTINGS MODAL -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 style="margin: 0; font-size: 1.1rem;">Configuration</h3>
+                <button class="icon-only" style="border:none; background:transparent;" onclick="toggleModal('settingsModal')"><i data-lucide="x" size="20"></i></button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; gap:16px;">
+                    <div class="form-group" style="flex:1;"><label>Hold (sec)</label><input type="number" id="cfgHold" value="5" min="1"></div>
+                    <div class="form-group" style="flex:1;"><label>Rest (sec)</label><input type="number" id="cfgRest" value="2" min="0"></div>
+                </div>
+                <div class="form-group">
+                    <label>AI Tracking Precision</label>
+                    <select id="modelSelector" onchange="switchModel(this.value)">
+                        <option value="0">Lite (Fastest, High FPS)</option>
+                        <option value="1" selected>Full (Standard Balance)</option>
+                        <option value="2">Heavy (Max Precision)</option>
+                    </select>
+                </div>
+                <div style="display:flex; gap:16px;">
+                    <div class="form-group" style="flex:1;"><label>Cam Dist (m)</label><input type="number" id="camDist" value="3.5" step="0.1" onchange="updateSpatialScale()"></div>
+                    <div class="form-group" style="flex:1;"><label>Lens Height (cm)</label><input type="number" id="camHeight" value="40" step="5"></div>
+                </div>
+                <div style="border-top: 1px solid var(--border); padding-top: 20px; display: flex; gap: 12px;">
+                    <button style="flex:1;" onclick="exportCSV()"><i data-lucide="download" size="16"></i> Export CSV</button>
+                    <button style="flex:1;" onclick="document.getElementById('csvFile').click()"><i data-lucide="upload" size="16"></i> Import DB</button>
+                    <input type="file" id="csvFile" accept=".csv" style="display: none;" onchange="importCSV(event)">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        function toggleModal(id) { document.getElementById(id).classList.toggle('open'); }
+
+        // --- VOCAL TELEMETRY & AUDIO SYNTHESIZER ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx, isMuted = false, speechUnlocked = false;
+
+        function unlockAudioEngines() {
+            if (!audioCtx) { audioCtx = new AudioContext(); if (audioCtx.state === 'suspended') audioCtx.resume(); }
+            if (!speechUnlocked && 'speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(''); window.speechSynthesis.speak(utterance); speechUnlocked = true;
+            }
+        }
+        if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+
+        function toggleMute() {
+            isMuted = !isMuted; const btn = document.getElementById('muteBtn'), icon = document.getElementById('muteIcon');
+            if (isMuted) { icon.setAttribute('data-lucide', 'volume-x'); btn.classList.add('active-toggle'); if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } 
+            else { icon.setAttribute('data-lucide', 'volume-2'); btn.classList.remove('active-toggle'); unlockAudioEngines(); beep(800, 'sine', 0.1); }
+            lucide.createIcons();
+        }
+
+        function speak(text, interrupt = false) {
+            if (isMuted || !('speechSynthesis' in window)) return;
+            if (interrupt) window.speechSynthesis.cancel(); 
+            const u = new SpeechSynthesisUtterance(text); u.rate = 1.15; u.pitch = 1.0; window.speechSynthesis.speak(u);
+        }
+
+        function beep(freq, type, dur) {
+            if (isMuted) return;
+            try {
+                if (!audioCtx) audioCtx = new AudioContext();
+                const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+                osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(1, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+                osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + dur);
+            } catch (e) {}
+        }
+        function playMetronomeClick() { if (!isMuted) beep(1000, 'square', 0.05); }
+        function playEndBeep() { if (!isMuted) beep(1200, 'sine', 0.4); }
+        function playErrorBuzzer() { if (!isMuted) beep(120, 'sawtooth', 0.3); }
+        function playTransitionBeep() { if (!isMuted) beep(800, 'sine', 0.2); }
+
+        // --- VAR RECORDER ---
+        let mediaRecorder, recordedChunks = [], isRecordingVAR = false, recordingStartTime = 0, varLogArray = [];
+        function startVAR() {
+            const stream = document.getElementById('output_canvas').captureStream(30);
+            try { mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' }); } catch (e) { mediaRecorder = new MediaRecorder(stream); }
+            mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); }; mediaRecorder.onstop = saveVARVideo;
+            recordedChunks = []; varLogArray = []; document.getElementById('varLogBox').innerHTML = ''; 
+            recordingStartTime = performance.now(); mediaRecorder.start(); isRecordingVAR = true;
+            document.getElementById('recBadge').style.display = 'flex'; document.getElementById('varStatusText').style.display = 'inline';
+        }
+        function stopVAR() {
+            if (mediaRecorder && isRecordingVAR) { mediaRecorder.stop(); isRecordingVAR = false; document.getElementById('recBadge').style.display = 'none'; document.getElementById('varStatusText').style.display = 'none'; }
+        }
+        function saveVARVideo() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.style.display = 'none'; a.href = url;
+            const subj = document.getElementById('subjectName').value.trim() || 'Subject'; a.download = `VAR_BassTest_${subj}_${Date.now()}.webm`; document.body.appendChild(a); a.click(); setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 200);
+            appendVARLog("SYS", "Recording finalized and downloaded.");
+        }
+        function appendVARLog(marker, eventText) {
+            const box = document.getElementById('varLogBox'); let timeStr = "00.0s";
+            if (isRecordingVAR) { timeStr = ((performance.now() - recordingStartTime) / 1000).toFixed(1) + "s"; varLogArray.push({ marker, time: timeStr, event: eventText }); }
+            const entry = document.createElement('div'); entry.className = 'var-entry'; entry.innerHTML = `<div class="var-time">[${timeStr.padStart(5, '0')}]</div><div class="var-event"><b>M${marker}:</b> ${eventText}</div>`; box.appendChild(entry); box.scrollTop = box.scrollHeight;
+        }
+
+        // --- CALIBRATION ENGINE ---
+        let isCalibrating = false, calibratedMarkers = [], landingScored = Array(10).fill(false); 
+        function toggleCalibration() {
+            isCalibrating = !isCalibrating; const banner = document.getElementById('calibBanner'), btn = document.getElementById('calibBtn'); unlockAudioEngines();
+            if (isCalibrating) { banner.style.display = 'flex'; btn.classList.add('active-calib'); updateCalibText(); speak("Calibration mode activated."); } 
+            else { banner.style.display = 'none'; btn.classList.remove('active-calib'); }
+        }
+        function clearCalibration() { calibratedMarkers = []; updateCalibText(); beep(400, 'sawtooth', 0.2); speak("Calibration reset.", true); }
+        function updateCalibText() {
+            const textElem = document.getElementById('calibText');
+            if (calibratedMarkers.length < 10) textElem.innerHTML = `Click video feed to place <b>Marker ${calibratedMarkers.length + 1}</b>`;
+            else { textElem.innerHTML = `<span style="color:var(--text-main)">All 10 Markers Set! Auto-scoring activated.</span>`; speak("All markers calibrated.", true); setTimeout(() => { if(isCalibrating) toggleCalibration(); }, 2000); }
+        }
+        document.getElementById('output_canvas').addEventListener('click', (e) => {
+            if (!isCalibrating || calibratedMarkers.length >= 10) return;
+            const c = e.target, v = document.getElementById('webcam'), r = c.getBoundingClientRect();
+            const vR = v.videoWidth / v.videoHeight, cR = r.width / r.height; let dW, dH, oX = 0, oY = 0;
+            if (vR > cR) { dW = r.width; dH = r.width / vR; oY = (r.height - dH) / 2; } else { dH = r.height; dW = r.height * vR; oX = (r.width - dW) / 2; }
+            const nx = (e.clientX - r.left - oX) / dW, ny = (e.clientY - r.top - oY) / dH;
+            if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
+            calibratedMarkers.push({x: nx, y: ny}); beep(800, 'sine', 0.1); updateCalibText();
+        });
+
+        // --- TIMER & SCORING SYSTEM ---
+        let timerActive = false, timerInterval = null, currentRound = 1, isHolding = false, secondsLeft = 5;
+        let scores = Array.from({ length: 10 }, () => ({ landing: 0, hold: 5 }));
+
+        function initTable() {
+            const tbody = document.getElementById('tableBody'); tbody.innerHTML = '';
+            for (let i = 0; i < 10; i++) {
+                const legLabel = (i % 2 === 0) ? `<span style="color:var(--brand); font-weight:600;">L</span>` : `<span style="color:var(--danger); font-weight:600;">R</span>`;
+                tbody.innerHTML += `<tr id="row_${i}"><td style="color:var(--text-muted); font-weight:600;">${i+1}</td><td>${legLabel}</td><td><input type="number" class="clean-input" value="${scores[i].landing}" oninput="validateInput(this, ${i}, 'landing')" onblur="fixEmpty(this, ${i}, 'landing')"></td><td><input type="number" class="clean-input" value="${scores[i].hold}" oninput="validateInput(this, ${i}, 'hold')" onblur="fixEmpty(this, ${i}, 'hold')"></td><td style="font-weight:700; color:var(--text-main);" id="tot_${i}">0</td></tr>`;
+            }
+            recomputeTotals();
+        }
+        function validateInput(elem, idx, key) {
+            let val = elem.value; if (val === '') scores[idx][key] = 0; else { let num = parseInt(val, 10); if (isNaN(num)) num = 0; if (num > 5) num = 5; if (num < 0) num = 0; if (elem.value !== num.toString()) elem.value = num; scores[idx][key] = num; }
+            document.getElementById(`tot_${idx}`).innerText = scores[idx].landing + scores[idx].hold; recomputeTotals();
+        }
+        function fixEmpty(elem, idx, key) { if (elem.value === '') { elem.value = '0'; scores[idx][key] = 0; recomputeTotals(); } }
+        function updateTableDOMRow(index) {
+            const r = document.getElementById(`row_${index}`); if (r) { const inps = r.querySelectorAll('input'); inps[0].value = scores[index].landing; inps[1].value = scores[index].hold; recomputeTotals(); }
+        }
+        function recomputeTotals() {
+            let grand = 0; for (let i = 0; i < 10; i++) { const sub = scores[i].landing + scores[i].hold; document.getElementById(`tot_${i}`).innerText = sub; grand += sub; } document.getElementById('grandTotal').innerText = grand;
+            const badge = document.getElementById('ratingBadge');
+            if (grand >= 90) { badge.innerText = "Excellent"; badge.style.color = "var(--success)"; } else if (grand >= 75) { badge.innerText = "Good"; badge.style.color = "var(--brand)"; } else if (grand >= 60) { badge.innerText = "Moderate"; badge.style.color = "#f59e0b"; } else { badge.innerText = "Needs Improvement"; badge.style.color = "var(--danger)"; } updateRadar();
+        }
+        function updateTimerCard() {
+            const card = document.getElementById('timerCard'), icon = document.getElementById('timerIcon');
+            document.getElementById('hudTime').innerText = `0:${secondsLeft.toString().padStart(2, '0')}`; document.getElementById('hudMarker').innerText = `Marker ${currentRound}`;
+            if (!timerActive && secondsLeft === 0) { document.getElementById('hudPhase').innerText = "Complete"; card.className = "timer-hud transition"; icon.setAttribute('data-lucide', 'check-circle'); } 
+            else if (isHolding) { document.getElementById('hudPhase').innerText = "Balancing (Hold)"; card.className = "timer-hud hold"; icon.setAttribute('data-lucide', timerActive ? 'pause-circle' : 'play-circle'); } 
+            else { document.getElementById('hudPhase').innerText = "Transition"; card.className = "timer-hud transition"; icon.setAttribute('data-lucide', timerActive ? 'pause-circle' : 'play-circle'); }
+            lucide.createIcons();
+        }
+
+        function toggleTimer() {
+            unlockAudioEngines();
+            if (timerActive) { clearInterval(timerInterval); timerActive = false; speak("Test Paused.", true); updateTimerCard(); return; }
+            timerActive = true;
+            if (secondsLeft <= 0) { currentRound = 1; isHolding = true; secondsLeft = parseInt(document.getElementById('cfgHold').value, 10); playTransitionBeep(); speak(`Hop to Marker 1`, true); startVAR(); } 
+            else if (currentRound === 1 && isHolding && secondsLeft === parseInt(document.getElementById('cfgHold').value, 10)) { speak(`Hop to Marker 1`, true); startVAR(); } else { speak("Resuming", true); }
+
+            timerInterval = setInterval(() => {
+                secondsLeft--;
+                if (isHolding) { if (secondsLeft === 3) speak("Three"); else if (secondsLeft === 2) speak("Two"); else if (secondsLeft === 1) speak("One"); else if (secondsLeft > 3) playMetronomeClick(); }
+                if (secondsLeft <= 0) {
+                    if (isHolding) {
+                        playEndBeep(); 
+                        if (currentRound < 10) { isHolding = false; secondsLeft = parseInt(document.getElementById('cfgRest').value, 10); speak(`Hop to Marker ${currentRound + 1}`); } 
+                        else { clearInterval(timerInterval); timerActive = false; isHolding = false; speak("Test Complete. Great job."); setTimeout(playTransitionBeep, 200); setTimeout(playEndBeep, 550); stopVAR(); updateTimerCard(); return; }
+                    } else { currentRound++; isHolding = true; secondsLeft = parseInt(document.getElementById('cfgHold').value, 10); }
+                }
+                updateTimerCard();
+            }, 1000); updateTimerCard();
+        }
+
+        function resetTimer() { clearInterval(timerInterval); timerActive = false; currentRound = 1; isHolding = true; secondsLeft = parseInt(document.getElementById('cfgHold').value, 10); scores = Array.from({ length: 10 }, () => ({ landing: 0, hold: 5 })); landingScored = Array(10).fill(false); initTable(); updateTimerCard(); unlockAudioEngines(); speak("Timer Reset.", true); stopVAR(); }
+
+        // RADAR CHART
+        let radarChartInstance = null;
+        function initRadar() {
+            Chart.defaults.color = '#a1a1aa'; Chart.defaults.font.family = "'Inter', sans-serif"; const ctx = document.getElementById('radarChart').getContext('2d');
+            radarChartInstance = new Chart(ctx, { type: 'radar', data: { labels: ['Stg 1', 'Stg 2', 'Stg 3', 'Stg 4', 'Stg 5'], datasets: [ { label: 'Left', data: [0,0,0,0,0], backgroundColor: 'rgba(59, 130, 246, 0.25)', borderColor: '#3b82f6', pointBackgroundColor: '#3b82f6', borderWidth: 2 }, { label: 'Right', data: [0,0,0,0,0], backgroundColor: 'rgba(239, 68, 68, 0.25)', borderColor: '#ef4444', pointBackgroundColor: '#ef4444', borderWidth: 2 } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { r: { min: 0, max: 10, ticks: { display: false }, grid: { color: 'rgba(255,255,255,0.08)' }, angleLines: { color: 'rgba(255,255,255,0.08)' }, pointLabels: { font: { size: 10, weight: 'bold' } } } }, plugins: { legend: { position: 'bottom', labels: { padding: 10, boxWidth: 10 } } } } });
+        }
+        function updateRadar() {
+            if (!radarChartInstance) return; const lData = [0, 2, 4, 6, 8].map(i => scores[i].landing + scores[i].hold), rData = [1, 3, 5, 7, 9].map(i => scores[i].landing + scores[i].hold);
+            radarChartInstance.data.datasets[0].data = lData; radarChartInstance.data.datasets[1].data = rData; radarChartInstance.update();
+        }
+        function calculateAngle(a, b, c) { const rads = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x); let angle = Math.abs(rads * 180.0 / Math.PI); return angle > 180.0 ? 360 - angle : angle; }
+
+        // --- COMPUTER VISION ENGINE & CAMERA TOGGLE ---
+        let poseDetector = null, cameraStream = null, spatialScaleFactor = 1.0;
+        let lastFrameTime = performance.now(), frameCount = 0, lastFaultDeduction = 0;
+        let currentFacingMode = "environment"; // DEFAULT TO REAR CAMERA
+
+        function updateSpatialScale() { spatialScaleFactor = (3.5 / (parseFloat(document.getElementById('camDist').value) || 3.5)); }
+        function createPoseInstance(comp) {
+            const pose = new Pose({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+            pose.setOptions({ modelComplexity: parseInt(comp), smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            pose.onResults(onPoseResults); return pose;
+        }
+        function switchModel(level) { if (poseDetector) poseDetector.close(); poseDetector = createPoseInstance(level); }
+
+        function toggleCamera() {
+            currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
+            initCamera();
+        }
+
+        const videoElem = document.getElementById('webcam'), canvasElem = document.getElementById('output_canvas'), canvasCtx = canvasElem.getContext('2d');
+
+        function onPoseResults(res) {
+            frameCount++; const now = performance.now();
+            if (now - lastFrameTime >= 1000) { document.getElementById('fpsDisplay').innerText = `AI Active (${Math.round((frameCount * 1000) / (now - lastFrameTime))} FPS)`; frameCount = 0; lastFrameTime = now; }
+
+            canvasElem.width = videoElem.videoWidth; canvasElem.height = videoElem.videoHeight;
+            canvasCtx.save(); canvasCtx.clearRect(0, 0, canvasElem.width, canvasElem.height);
+            
+            // Handle Mirroring for Front Camera
+            if (currentFacingMode === "user") {
+                canvasCtx.translate(canvasElem.width, 0); canvasCtx.scale(-1, 1);
+            }
+            
+            canvasCtx.drawImage(res.image, 0, 0, canvasElem.width, canvasElem.height); 
+            
+            calibratedMarkers.forEach((m, idx) => {
+                const px = m.x * canvasElem.width, py = m.y * canvasElem.height;
+                canvasCtx.beginPath(); canvasCtx.arc(px, py, 0.12 * spatialScaleFactor * canvasElem.width, 0, 2 * Math.PI); canvasCtx.fillStyle = 'rgba(245, 158, 11, 0.15)'; canvasCtx.fill(); 
+                canvasCtx.beginPath(); canvasCtx.arc(px, py, 0.05 * spatialScaleFactor * canvasElem.width, 0, 2 * Math.PI); canvasCtx.fillStyle = 'rgba(16, 185, 129, 0.25)'; canvasCtx.fill(); 
+                
+                // Flip text back so it's readable if camera is mirrored
+                if (currentFacingMode === "user") { canvasCtx.save(); canvasCtx.translate(px, py); canvasCtx.scale(-1, 1); canvasCtx.fillStyle = '#fff'; canvasCtx.font = "bold 14px Inter"; canvasCtx.fillText(`M${idx + 1}`, 10, 4); canvasCtx.restore(); } 
+                else { canvasCtx.fillStyle = '#fff'; canvasCtx.font = "bold 14px Inter"; canvasCtx.fillText(`M${idx + 1}`, px - 10, py + 4); }
+            });
+
+            let hFault = false, fFault = false, hlFault = false, kFault = false;
+
+            if (res.poseLandmarks) {
+                const lm = res.poseLandmarks;
+                drawConnectors(canvasCtx, lm, POSE_CONNECTIONS, { color: 'rgba(255,255,255,0.3)', lineWidth: 2 }); drawLandmarks(canvasCtx, lm, { color: '#3b82f6', lineWidth: 1, radius: 2 });
+                const sSpan = Math.hypot(lm[11].x - lm[12].x, lm[11].y - lm[12].y);
+                if (Math.hypot(lm[15].x - lm[23].x, lm[15].y - lm[23].y) > sSpan * 0.45 || Math.hypot(lm[16].x - lm[24].x, lm[16].y - lm[24].y) > sSpan * 0.45) hFault = true;
+                const isLeftStance = lm[27].y > lm[28].y; const sAnk = isLeftStance ? lm[27] : lm[28], fAnk = isLeftStance ? lm[28] : lm[27], sHip = isLeftStance ? lm[23] : lm[24], sKnee = isLeftStance ? lm[25] : lm[26], sToe = isLeftStance ? lm[31] : lm[32]; 
+                if ((sAnk.y - fAnk.y) < (0.075 * spatialScaleFactor)) fFault = true;
+                const sHeel = isLeftStance ? lm[29] : lm[30]; if (sHeel.y >= (sToe.y - 0.012)) hlFault = true;
+                const kneeAngle = calculateAngle(sHip, sKnee, sAnk);
+                if (kneeAngle < 155) { kFault = true; drawConnectors(canvasCtx, [sHip, sKnee, sAnk], [[0,1], [1,2]], { color: '#ef4444', lineWidth: 4 }); drawLandmarks(canvasCtx, [sKnee], { color: '#ef4444', radius: 6 }); } 
+                else { drawConnectors(canvasCtx, [sHip, sKnee, sAnk], [[0,1], [1,2]], { color: '#10b981', lineWidth: 3 }); }
+                
+                if (currentFacingMode === "user") { canvasCtx.save(); canvasCtx.translate((sKnee.x * canvasElem.width), sKnee.y * canvasElem.height); canvasCtx.scale(-1, 1); canvasCtx.font = "bold 20px Inter"; canvasCtx.fillStyle = kFault ? "#ef4444" : "#10b981"; canvasCtx.fillText(Math.round(kneeAngle) + "°", -40, 0); canvasCtx.restore(); } 
+                else { canvasCtx.font = "bold 20px Inter"; canvasCtx.fillStyle = kFault ? "#ef4444" : "#10b981"; canvasCtx.fillText(Math.round(kneeAngle) + "°", (sKnee.x * canvasElem.width) + 20, sKnee.y * canvasElem.height); }
+
+                if (timerActive && isHolding) {
+                    let targetIndex = currentRound - 1; const holdCfg = parseInt(document.getElementById('cfgHold').value, 10);
+                    if (!landingScored[targetIndex] && calibratedMarkers[targetIndex] && secondsLeft <= (holdCfg - 1)) {
+                        const m = calibratedMarkers[targetIndex]; const dPx = Math.hypot((sToe.x * canvasElem.width) - (m.x * canvasElem.width), (sToe.y * canvasElem.height) - (m.y * canvasElem.height));
+                        let pts = 0; if (dPx <= 0.05 * spatialScaleFactor * canvasElem.width) pts = 5; else if (dPx <= 0.12 * spatialScaleFactor * canvasElem.width) pts = 3;
+                        scores[targetIndex].landing = pts; updateTableDOMRow(targetIndex); landingScored[targetIndex] = true;
+                        if (pts === 5) beep(1000, 'sine', 0.15); else if (pts === 3) beep(600, 'sine', 0.15); else playErrorBuzzer();
+                        appendVARLog(currentRound, `Landed with ${pts} accuracy pts.`);
+                    }
+                    if ((hFault || fFault || hlFault || kFault) && (now - lastFaultDeduction >= 1000)) {
+                        if (targetIndex < 10 && scores[targetIndex].hold > 0) {
+                            scores[targetIndex].hold -= 1; updateTableDOMRow(targetIndex); playErrorBuzzer();
+                            let fNames = [];
+                            if (kFault) { speak("Stabilize knee", true); fNames.push("Valgus Collapse"); } else if (hFault) { speak("Keep hands on hips", true); fNames.push("Hands Off Hips"); } else if (fFault) { speak("Don't touch foot", true); fNames.push("Free Foot Touchdown"); } else if (hlFault) { speak("Elevate heel", true); fNames.push("Heel Grounded"); }
+                            appendVARLog(currentRound, `Hold Deduction (-1): ${fNames.join(', ')}`);
+                        }
+                        lastFaultDeduction = now;
+                    }
+                }
+            }
+            const updBadge = (id, fault, bad, good) => { const p = document.getElementById(`card${id}`), b = document.getElementById(`badge${id}`); if (fault) { p.classList.add('active'); b.innerText = bad; } else { p.classList.remove('active'); b.innerText = good; } };
+            updBadge('Hands', hFault, 'Off Hips', 'Hands on Hips'); updBadge('Foot', fFault, 'Touchdown Fault', 'Free Foot Clear'); updBadge('Heel', hlFault, 'Heel Grounded', 'Heel Elevated'); updBadge('Knee', kFault, 'Knee Collapse', 'Knee Stable');
+            canvasCtx.restore();
+        }
+
+        async function initCamera() {
+            if (cameraStream) { cameraStream.stop(); }
+            document.getElementById('fpsDisplay').innerText = "Starting Camera...";
+            poseDetector = createPoseInstance(1);
+            try { 
+                cameraStream = new Camera(videoElem, { 
+                    onFrame: async () => { if (poseDetector) await poseDetector.send({ image: videoElem }); }, 
+                    facingMode: currentFacingMode,
+                    width: 1280, height: 720 
+                }); 
+                await cameraStream.start(); 
+            } catch (err) {
+                document.getElementById('fpsDisplay').innerText = "Camera Blocked (HTTPS Required)";
+                document.getElementById('fpsDisplay').style.color = "var(--danger)";
+                alert("Camera access denied. Ensure you are using an 'https://' secure connection (like GitHub Pages) and have granted browser permissions.");
+            }
+        }
+
+        let subjectStore = JSON.parse(localStorage.getItem('bass_ai_store') || '[]');
+        function saveSubject() { const id = document.getElementById('subjectName').value.trim() || `Subj_${Date.now()}`; subjectStore.push({ id, date: new Date().toISOString(), total: parseInt(document.getElementById('grandTotal').innerText), scores: JSON.parse(JSON.stringify(scores)), var_log: JSON.parse(JSON.stringify(varLogArray)) }); localStorage.setItem('bass_ai_store', JSON.stringify(subjectStore)); speak("Data Saved."); alert(`Test Data Saved: ${id}`); }
+        function exportCSV() { let csv = "ID,Date,Total,M1_L,M1_H,M2_L,M2_H,M3_L,M3_H,M4_L,M4_H,M5_L,M5_H,M6_L,M6_H,M7_L,M7_H,M8_L,M8_H,M9_L,M9_H,M10_L,M10_H\n"; subjectStore.forEach(r => { let row = `"${r.id}","${r.date}",${r.total},`; r.scores.forEach(s => row += `${s.landing},${s.hold},`); csv += row.slice(0, -1) + "\n"; }); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `BassTest_Data.csv`; a.click(); }
+
+        window.addEventListener('DOMContentLoaded', () => { initTable(); initRadar(); initCamera(); updateTimerCard(); updateSpatialScale(); });
+    </script>
+</body>
+</html>
